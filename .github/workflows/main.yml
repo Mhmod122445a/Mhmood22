@@ -1,0 +1,33 @@
+name: Windows RDP Server
+
+on: workflow_dispatch
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 360
+    steps:
+    - name: Setup RDP
+      run: |
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+        New-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+        netsh advfirewall firewall add rule name="RDP" dir=in action=allow protocol=TCP localport=3389
+        net user runner Admin@12345 /add
+        net localgroup Administrators runner /add
+        net localgroup "Remote Desktop Users" runner /add
+      shell: pwsh
+
+    - name: Connect Tailscale
+      uses: tailscale/github-action@v4
+      with:
+        authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
+        tags: tag:ci
+
+    - name: Show RDP Info & Keep Alive
+      run: |
+        $ip = (tailscale ip -4).Trim()
+        Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Address: $ip`:3389"
+        Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "User: runner"
+        Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Pass: Admin@12345"
+        for ($i=0; $i -lt 340; $i++) { Start-Sleep -Seconds 60 }
+      shell: pwsh
