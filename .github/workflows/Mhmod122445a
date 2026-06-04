@@ -1,0 +1,46 @@
+name: Secure RDP via Tailscale
+
+on:
+  workflow_dispatch:
+
+jobs:
+  rdp:
+    runs-on: windows-latest
+    timeout-minutes: 360
+    steps:
+      - name: 1. Enable RDP & Create Admin User
+        shell: pwsh
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+          netsh advfirewall firewall add rule name="RDP" dir=in action=allow protocol=TCP localport=3389
+
+          $user = "rdpuser"
+          $pass = "Admin@'$([System.Guid]::NewGuid().ToString().Substring(0,8))'!"
+          $secpass = ConvertTo-SecureString $pass -AsPlainText -Force
+
+          New-LocalUser -Name $user -Password $secpass -FullName "RDP User" -Description "Temporary Admin"
+          Add-LocalGroupMember -Group "Administrators" -Member $user
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $user
+
+          "Username: $user" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "Password: $pass" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+
+      - name: 2. Install & Connect Tailscale
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          tags: tag:ci
+
+      - name: 3. Display Connection Info & Keep Alive
+        shell: pwsh
+        run: |
+          $tsIP = (tailscale ip -4).Trim()
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Tailscale IP: $tsIP"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Address (for RDP): `n$tsIP:3389"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "---"
+
+          for ($i=1; $i -le 320; $i++) {
+              Write-Host "[$(Get-Date)] Runner active. $([int](320-$i)) minutes remaining."
+              Start-Sleep -Seconds 60
+          }
